@@ -239,13 +239,13 @@ class SwinTransformerBlock(nn.Module):
         x = self.norm1(x)
         x = x.view(B, H, W, C)
 
-        # cyclic shift
+        # cyclic shift shifts的值为正数相当于向下挤牙膏，挤出的牙膏又从顶部塞回牙膏里面；shifts的值为负数相当于向上挤牙膏，挤出的牙膏又从底部塞回牙膏里面
         if self.shift_size > 0:
             shifted_x = torch.roll(x, shifts=(-self.shift_size, -self.shift_size), dims=(1, 2))
         else:
             shifted_x = x
 
-        # partition windows
+        # partition windows 转换window形式
         x_windows = window_partition(shifted_x, self.window_size)  # nW*B, window_size, window_size, C
         x_windows = x_windows.view(-1, self.window_size * self.window_size, C)  # nW*B, window_size*window_size, C
 
@@ -517,7 +517,7 @@ class SwinTransformer(nn.Module):
 
         # build layers
         self.layers = nn.ModuleList()
-        for i_layer in range(self.num_layers):
+        for i_layer in range(self.num_layers): #depth
             layer = BasicLayer(dim=int(embed_dim * 2 ** i_layer),
                                input_resolution=(patches_resolution[0] // (2 ** i_layer),
                                                  patches_resolution[1] // (2 ** i_layer)),

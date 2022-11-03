@@ -34,6 +34,8 @@ except ImportError:
     amp = None
 
 
+device = torch.device('cpu')
+
 def parse_option():
     parser = argparse.ArgumentParser('Swin Transformer training and evaluation script', add_help=False)
     parser.add_argument('--cfg', type=str, required=True, metavar="FILE", help='path to config file', )
@@ -58,7 +60,7 @@ def parse_option():
     parser.add_argument('--accumulation-steps', type=int, help="gradient accumulation steps")
     parser.add_argument('--use-checkpoint', action='store_true',
                         help="whether to use gradient checkpointing to save memory")
-    parser.add_argument('--amp-opt-level', type=str, default='O1', choices=['O0', 'O1', 'O2'],
+    parser.add_argument('--amp-opt-level', type=str, default='O0', choices=['O0', 'O1', 'O2'],
                         help='mixed precision opt level, if O0, no amp is used')
     parser.add_argument('--output', default='output', type=str, metavar='PATH',
                         help='root of output folder, the full path is <output>/<model_name>/<tag> (default: output)')
@@ -81,20 +83,20 @@ def main(config):
 
     logger.info(f"Creating model:{config.MODEL.TYPE}/{config.MODEL.NAME}")
     model = build_model(config)
-    model.cuda()
+    model.to(device)
     logger.info(str(model))
 
     optimizer = build_optimizer(config, model)
-    if config.AMP_OPT_LEVEL != "O0":
-        model, optimizer = amp.initialize(model, optimizer, opt_level=config.AMP_OPT_LEVEL)
-    model = torch.nn.parallel.DistributedDataParallel(model, device_ids=[config.LOCAL_RANK], broadcast_buffers=False)
-    model_without_ddp = model.module
+    # if config.AMP_OPT_LEVEL != "O0":
+    #     model, optimizer = amp.initialize(model, optimizer, opt_level=config.AMP_OPT_LEVEL)
+    # model = torch.nn.parallel.DistributedDataParallel(model, device_ids=[config.LOCAL_RANK], broadcast_buffers=False)
+    # model_without_ddp = model.module
 
     n_parameters = sum(p.numel() for p in model.parameters() if p.requires_grad)
     logger.info(f"number of params: {n_parameters}")
-    if hasattr(model_without_ddp, 'flops'):
-        flops = model_without_ddp.flops()
-        logger.info(f"number of GFLOPs: {flops / 1e9}")
+    # if hasattr(model_without_ddp, 'flops'):
+    #     flops = model_without_ddp.flops()
+    #     logger.info(f"number of GFLOPs: {flops / 1e9}")
 
     lr_scheduler = build_scheduler(config, optimizer, len(data_loader_train))
 
@@ -139,7 +141,7 @@ def main(config):
     logger.info("Start training")
     start_time = time.time()
     for epoch in range(config.TRAIN.START_EPOCH, config.TRAIN.EPOCHS):
-        data_loader_train.sampler.set_epoch(epoch)
+        # data_loader_train.sampler.set_epoch(epoch)
 
         train_one_epoch(config, model, criterion, data_loader_train, optimizer, epoch, mixup_fn, lr_scheduler)
         if dist.get_rank() == 0 and (epoch % config.SAVE_FREQ == 0 or epoch == (config.TRAIN.EPOCHS - 1)):
@@ -167,8 +169,10 @@ def train_one_epoch(config, model, criterion, data_loader, optimizer, epoch, mix
     start = time.time()
     end = time.time()
     for idx, (samples, targets) in enumerate(data_loader):
-        samples = samples.cuda(non_blocking=True)
-        targets = targets.cuda(non_blocking=True)
+        # samples = samples.cuda(non_blocking=True)
+        # targets = targets.cuda(non_blocking=True)
+        samples = samples.to(device)(non_blocking=True)
+        targets = targets.to(device)(non_blocking=True)
 
         if mixup_fn is not None:
             samples, targets = mixup_fn(samples, targets)
@@ -214,7 +218,8 @@ def train_one_epoch(config, model, criterion, data_loader, optimizer, epoch, mix
             optimizer.step()
             lr_scheduler.step_update(epoch * num_steps + idx)
 
-        torch.cuda.synchronize()
+        # torch.cuda.synchronize()
+        torch.to(device).synchronize()
 
         loss_meter.update(loss.item(), targets.size(0))
         norm_meter.update(grad_norm)
@@ -223,7 +228,8 @@ def train_one_epoch(config, model, criterion, data_loader, optimizer, epoch, mix
 
         if idx % config.PRINT_FREQ == 0:
             lr = optimizer.param_groups[0]['lr']
-            memory_used = torch.cuda.max_memory_allocated() / (1024.0 * 1024.0)
+            # memory_used = torch.cuda.max_memory_allocated() / (1024.0 * 1024.0)
+            memory_used = torch.to(device).max_memory_allocated() / (1024.0 * 1024.0)
             etas = batch_time.avg * (num_steps - idx)
             logger.info(
                 f'Train: [{epoch}/{config.TRAIN.EPOCHS}][{idx}/{num_steps}]\t'
@@ -271,7 +277,8 @@ def validate(config, data_loader, model):
         end = time.time()
 
         if idx % config.PRINT_FREQ == 0:
-            memory_used = torch.cuda.max_memory_allocated() / (1024.0 * 1024.0)
+            # memory_used = torch.cuda.max_memory_allocated() / (1024.0 * 1024.0)
+            memory_used = torch.to(device).max_memory_allocated() / (1024.0 * 1024.0)
             logger.info(
                 f'Test: [{idx}/{len(data_loader)}]\t'
                 f'Time {batch_time.val:.3f} ({batch_time.avg:.3f})\t'
@@ -292,12 +299,14 @@ def throughput(data_loader, model, logger):
         batch_size = images.shape[0]
         for i in range(50):
             model(images)
-        torch.cuda.synchronize()
+        # torch.cuda.synchronize()
+        torch.to(device).synchronize()
         logger.info(f"throughput averaged with 30 times")
         tic1 = time.time()
         for i in range(30):
             model(images)
-        torch.cuda.synchronize()
+        # torch.cuda.synchronize()
+        torch.to(device).synchronize()
         tic2 = time.time()
         logger.info(f"batch_size {batch_size} throughput {30 * batch_size / (tic2 - tic1)}")
         return
@@ -316,21 +325,25 @@ if __name__ == '__main__':
     else:
         rank = -1
         world_size = -1
-    torch.cuda.set_device(config.LOCAL_RANK)
-    torch.distributed.init_process_group(backend='nccl', init_method='env://', world_size=world_size, rank=rank)
-    torch.distributed.barrier()
+    # torch.cuda.set_device(config.LOCAL_RANK)
+    # torch.distributed.init_process_group(backend='nccl', init_method='env://', world_size=world_size, rank=rank)
+    # torch.distributed.barrier()
 
-    seed = config.SEED + dist.get_rank()
+    # seed = config.SEED + dist.get_rank()
+    seed = config.SEED
     torch.manual_seed(seed)
-    torch.cuda.manual_seed(seed)
+    torch.manual_seed(seed)
     np.random.seed(seed)
     random.seed(seed)
     cudnn.benchmark = True
 
     # linear scale the learning rate according to total batch size, may not be optimal
-    linear_scaled_lr = config.TRAIN.BASE_LR * config.DATA.BATCH_SIZE * dist.get_world_size() / 512.0
-    linear_scaled_warmup_lr = config.TRAIN.WARMUP_LR * config.DATA.BATCH_SIZE * dist.get_world_size() / 512.0
-    linear_scaled_min_lr = config.TRAIN.MIN_LR * config.DATA.BATCH_SIZE * dist.get_world_size() / 512.0
+    # linear_scaled_lr = config.TRAIN.BASE_LR * config.DATA.BATCH_SIZE * dist.get_world_size() / 512.0
+    # linear_scaled_warmup_lr = config.TRAIN.WARMUP_LR * config.DATA.BATCH_SIZE * dist.get_world_size() / 512.0
+    # linear_scaled_min_lr = config.TRAIN.MIN_LR * config.DATA.BATCH_SIZE * dist.get_world_size() / 512.0
+    linear_scaled_lr = config.TRAIN.BASE_LR * config.DATA.BATCH_SIZE  / 512.0
+    linear_scaled_warmup_lr = config.TRAIN.WARMUP_LR * config.DATA.BATCH_SIZE  / 512.0
+    linear_scaled_min_lr = config.TRAIN.MIN_LR * config.DATA.BATCH_SIZE / 512.0
     # gradient accumulation also need to scale the learning rate
     if config.TRAIN.ACCUMULATION_STEPS > 1:
         linear_scaled_lr = linear_scaled_lr * config.TRAIN.ACCUMULATION_STEPS
@@ -343,13 +356,14 @@ if __name__ == '__main__':
     config.freeze()
 
     os.makedirs(config.OUTPUT, exist_ok=True)
-    logger = create_logger(output_dir=config.OUTPUT, dist_rank=dist.get_rank(), name=f"{config.MODEL.NAME}")
+    # logger = create_logger(output_dir=config.OUTPUT, dist_rank=dist.get_rank(), name=f"{config.MODEL.NAME}")
+    logger = create_logger(output_dir=config.OUTPUT, name=f"{config.MODEL.NAME}")
 
-    if dist.get_rank() == 0:
-        path = os.path.join(config.OUTPUT, "config.json")
-        with open(path, "w") as f:
-            f.write(config.dump())
-        logger.info(f"Full config saved to {path}")
+    # if dist.get_rank() == 0:
+    #     path = os.path.join(config.OUTPUT, "config.json")
+    #     with open(path, "w") as f:
+    #         f.write(config.dump())
+    #     logger.info(f"Full config saved to {path}")
 
     # print config
     logger.info(config.dump())

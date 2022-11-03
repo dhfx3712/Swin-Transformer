@@ -36,32 +36,32 @@ except:
 
 
 def build_loader(config):
-    config.defrost()
-    dataset_train, config.MODEL.NUM_CLASSES = build_dataset(is_train=True, config=config)
-    config.freeze()
-    print(f"local rank {config.LOCAL_RANK} / global rank {dist.get_rank()} successfully build train dataset")
+    # config.defrost()
+    dataset_train, NUM_CLASSES = build_dataset(is_train=True, config=config)
+    # config.freeze()
+    # print(f"local rank {config.LOCAL_RANK} / global rank {dist.get_rank()} successfully build train dataset")
     dataset_val, _ = build_dataset(is_train=False, config=config)
-    print(f"local rank {config.LOCAL_RANK} / global rank {dist.get_rank()} successfully build val dataset")
-
-    num_tasks = dist.get_world_size()
-    global_rank = dist.get_rank()
-    if config.DATA.ZIP_MODE and config.DATA.CACHE_MODE == 'part':
-        indices = np.arange(dist.get_rank(), len(dataset_train), dist.get_world_size())
-        sampler_train = SubsetRandomSampler(indices)
-    else:
-        sampler_train = torch.utils.data.DistributedSampler(
-            dataset_train, num_replicas=num_tasks, rank=global_rank, shuffle=True
-        )
-
-    if config.TEST.SEQUENTIAL:
-        sampler_val = torch.utils.data.SequentialSampler(dataset_val)
-    else:
-        sampler_val = torch.utils.data.distributed.DistributedSampler(
-            dataset_val, shuffle=False
-        )
+    # print(f"local rank {config.LOCAL_RANK} / global rank {dist.get_rank()} successfully build val dataset")
+    #
+    # num_tasks = dist.get_world_size()
+    # global_rank = dist.get_rank()
+    # if config.DATA.ZIP_MODE and config.DATA.CACHE_MODE == 'part':
+    #     indices = np.arange(dist.get_rank(), len(dataset_train), dist.get_world_size())
+    #     sampler_train = SubsetRandomSampler(indices)
+    # else:
+    #     sampler_train = torch.utils.data.DistributedSampler(
+    #         dataset_train, num_replicas=num_tasks, rank=global_rank, shuffle=True
+    #     )
+    #
+    # if config.TEST.SEQUENTIAL:
+    #     sampler_val = torch.utils.data.SequentialSampler(dataset_val)
+    # else:
+    #     sampler_val = torch.utils.data.distributed.DistributedSampler(
+    #         dataset_val, shuffle=False
+    #     )
 
     data_loader_train = torch.utils.data.DataLoader(
-        dataset_train, sampler=sampler_train,
+        dataset_train, sampler=None,
         batch_size=config.DATA.BATCH_SIZE,
         num_workers=config.DATA.NUM_WORKERS,
         pin_memory=config.DATA.PIN_MEMORY,
@@ -69,7 +69,7 @@ def build_loader(config):
     )
 
     data_loader_val = torch.utils.data.DataLoader(
-        dataset_val, sampler=sampler_val,
+        dataset_val, sampler=None,
         batch_size=config.DATA.BATCH_SIZE,
         shuffle=False,
         num_workers=config.DATA.NUM_WORKERS,
@@ -91,6 +91,7 @@ def build_loader(config):
 
 def build_dataset(is_train, config):
     transform = build_transform(is_train, config)
+    print ("aaa")
     if config.DATA.DATASET == 'imagenet':
         prefix = 'train' if is_train else 'val'
         if config.DATA.ZIP_MODE:
@@ -99,9 +100,13 @@ def build_dataset(is_train, config):
             dataset = CachedImageFolder(config.DATA.DATA_PATH, ann_file, prefix, transform,
                                         cache_mode=config.DATA.CACHE_MODE if is_train else 'part')
         else:
-            root = os.path.join(config.DATA.DATA_PATH, prefix)
+
+            # root = os.path.join(config.DATA.DATA_PATH, prefix)
+            root = os.path.join(config.DATA.DATA_PATH)
+
             dataset = datasets.ImageFolder(root, transform=transform)
-        nb_classes = 1000
+            print(f"root : {root} {dataset}")
+        nb_classes = 100
     elif config.DATA.DATASET == 'imagenet22K':
         raise NotImplementedError("Imagenet-22K will come soon.")
     else:
