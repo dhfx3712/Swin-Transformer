@@ -120,7 +120,7 @@ def build_transform(is_train, config):
     if is_train:
         # this should always dispatch to transforms_imagenet_train
         transform = create_transform(
-            input_size=config.DATA.IMG_SIZE,
+            input_size=config.DATA.IMG_SIZE, #最后resize到这个尺寸
             is_training=True,
             color_jitter=config.AUG.COLOR_JITTER if config.AUG.COLOR_JITTER > 0 else None,
             auto_augment=config.AUG.AUTO_AUGMENT if config.AUG.AUTO_AUGMENT != 'none' else None,

@@ -82,7 +82,7 @@ class WindowAttention(nn.Module):
         self.dim = dim
         self.window_size = window_size  # Wh, Ww
         self.num_heads = num_heads
-        head_dim = dim // num_heads
+        head_dim = dim // num_heads #多头机制
         self.scale = qk_scale or head_dim ** -0.5
 
         # define a parameter table of relative position bias
@@ -100,14 +100,14 @@ class WindowAttention(nn.Module):
         relative_coords[:, :, 1] += self.window_size[1] - 1
         relative_coords[:, :, 0] *= 2 * self.window_size[1] - 1
         relative_position_index = relative_coords.sum(-1)  # Wh*Ww, Wh*Ww
-        self.register_buffer("relative_position_index", relative_position_index)
+        self.register_buffer("relative_position_index", relative_position_index) #relative_position相对位子序号
 
         self.qkv = nn.Linear(dim, dim * 3, bias=qkv_bias)
         self.attn_drop = nn.Dropout(attn_drop)
         self.proj = nn.Linear(dim, dim)
         self.proj_drop = nn.Dropout(proj_drop)
 
-        trunc_normal_(self.relative_position_bias_table, std=.02)
+        trunc_normal_(self.relative_position_bias_table, std=.02) #按std初始化
         self.softmax = nn.Softmax(dim=-1)
 
     def forward(self, x, mask=None):
@@ -117,10 +117,10 @@ class WindowAttention(nn.Module):
             mask: (0/-inf) mask with shape of (num_windows, Wh*Ww, Wh*Ww) or None
         """
         B_, N, C = x.shape
-        qkv = self.qkv(x).reshape(B_, N, 3, self.num_heads, C // self.num_heads).permute(2, 0, 3, 1, 4)
+        qkv = self.qkv(x).reshape(B_, N, 3, self.num_heads, C // self.num_heads).permute(2, 0, 3, 1, 4)#C变3倍，reshape （3，heads，C/heads）
         q, k, v = qkv[0], qkv[1], qkv[2]  # make torchscript happy (cannot use tensor as tuple)
 
-        q = q * self.scale
+        q = q * self.scale #归一化的作用
         attn = (q @ k.transpose(-2, -1))
 
         relative_position_bias = self.relative_position_bias_table[self.relative_position_index.view(-1)].view(
@@ -160,7 +160,7 @@ class WindowAttention(nn.Module):
         return flops
 
 
-class SwinTransformerBlock(nn.Module):
+class SwinTransformerBlock(nn.Module): #attn 和 mlp
     r""" Swin Transformer Block.
 
     Args:
@@ -426,7 +426,7 @@ class PatchEmbed(nn.Module):
         self.img_size = img_size
         self.patch_size = patch_size
         self.patches_resolution = patches_resolution
-        self.num_patches = patches_resolution[0] * patches_resolution[1]
+        self.num_patches = patches_resolution[0] * patches_resolution[1] #取整数个path块
 
         self.in_chans = in_chans
         self.embed_dim = embed_dim
@@ -442,7 +442,7 @@ class PatchEmbed(nn.Module):
         # FIXME look at relaxing size constraints
         assert H == self.img_size[0] and W == self.img_size[1], \
             f"Input image size ({H}*{W}) doesn't match model ({self.img_size[0]}*{self.img_size[1]})."
-        x = self.proj(x).flatten(2).transpose(1, 2)  # B Ph*Pw C
+        x = self.proj(x).flatten(2).transpose(1, 2)  # B Ph*Pw C 转换输出形式
         if self.norm is not None:
             x = self.norm(x)
         return x
@@ -517,7 +517,7 @@ class SwinTransformer(nn.Module):
 
         # build layers
         self.layers = nn.ModuleList()
-        for i_layer in range(self.num_layers): #depth
+        for i_layer in range(self.num_layers): #depth basiclayer结合每层的深度整体输出（SwinTransformerBlock，可选downsample）dim维度会随着层数改变，mlp层增4倍
             layer = BasicLayer(dim=int(embed_dim * 2 ** i_layer),
                                input_resolution=(patches_resolution[0] // (2 ** i_layer),
                                                  patches_resolution[1] // (2 ** i_layer)),
@@ -562,7 +562,7 @@ class SwinTransformer(nn.Module):
             x = x + self.absolute_pos_embed
         x = self.pos_drop(x)
 
-        for layer in self.layers:
+        for layer in self.layers: #BasicLayer输出
             x = layer(x)
 
         x = self.norm(x)  # B L C
@@ -572,7 +572,7 @@ class SwinTransformer(nn.Module):
 
     def forward(self, x):
         x = self.forward_features(x)
-        x = self.head(x)
+        x = self.head(x) #分类头，类别个数
         return x
 
     def flops(self):
